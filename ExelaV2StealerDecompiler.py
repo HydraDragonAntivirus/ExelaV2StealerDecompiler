@@ -11,6 +11,15 @@ import re
 import pefile
 import pyzipper
 import subprocess
+import tempfile
+
+# Set script directory
+script_dir = os.getcwd()
+
+detectiteasy_dir = os.path.join(script_dir, "detectiteasy")
+detectiteasy_console_path = os.path.join(detectiteasy_dir, "diec.exe")
+# 7-Zip executable path
+seven_zip_executable = "C:\\Program Files\\7-Zip\\7z.exe"
 
 class CTOCEntry:
     def __init__(self, position, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, name):
@@ -388,69 +397,170 @@ def extract_webhooks(content):
 
 def is_winrar_sfx(file_path):
     """
-    Main function to check if the file is a WinRAR SFX archive using detectiteasy.
+    Checks if the file is a WinRAR SFX archive using detectiteasy.
     """
     try:
-        # Define the path to the detectiteasy console executable (diec.exe)
+        # Path to the detectiteasy console executable
         detectiteasy_dir = os.path.join(os.path.dirname(__file__), "detectiteasy")
         detectiteasy_console_path = os.path.join(detectiteasy_dir, "diec.exe")
         
-        # Check if the detectiteasy console executable exists
         if not os.path.exists(detectiteasy_console_path):
             print(f"[-] detectiteasy console (diec.exe) not found at {detectiteasy_console_path}")
             return False
-        
-        # Run the DIE console command to analyze the file
-        result = subprocess.run([detectiteasy_console_path, file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        
-        # Check for any errors from the subprocess
-        if result.returncode != 0:
-            print(f"[-] Error running detectiteasy: {result.stderr}")
-            return False
-        
-        # Analyze the output to determine if the file is a WinRAR SFX
-        output = result.stdout
-        if "WinRAR SFX archive" in output:
-            print("[+] This is a WinRAR SFX archive.")
-            return True
-        else:
-            print("[-] This is not a WinRAR SFX archive.")
-            return False
+
+        print(f"[*] Checking file: {file_path}")
+
+        # Create a temporary file with a simple name
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".exe") as temp_file:
+            temp_file_path = temp_file.name
+            
+            # Copy original file content to the temporary file
+            with open(file_path, "rb") as original_file:
+                temp_file.write(original_file.read())
+            
+            # Close to ensure the file is ready for external use
+            temp_file.close()
+
+            # Verify that the file path exists before executing
+            if not os.path.exists(temp_file_path):
+                print(f"[-] Verified failure: temporary file does not exist at {temp_file_path}")
+                return False
+            
+            print(f"[*] Running detectiteasy on {temp_file_path}")
+
+            # Run the command
+            result = subprocess.run([detectiteasy_console_path, temp_file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+            if result.returncode != 0:
+                print(f"[-] Error running detectiteasy:\n{result.stderr}")
+                print(f"[*] Subprocess output:\n{result.stdout}")
+                return False
+
+            print(f"[*] Subprocess output:\n{result.stdout}")
+
+            # Determine if it's a WinRAR SFX
+            if "Sfx: WinRAR" in result.stdout:
+                print("[+] This is a WinRAR SFX archive.")
+                return True
+            else:
+                print("[-] This is not a WinRAR SFX archive.")
+                return False
 
     except Exception as e:
         print(f"[-] Error processing the file: {e}")
         return False
-       
+
+    finally:
+        if os.path.exists(temp_file_path):
+            try:
+                print(f"[*] Removing temporary file: {temp_file_path}")
+                os.remove(temp_file_path)
+            except Exception as cleanup_error:
+                print(f"[-] Error removing temporary file: {cleanup_error}")
+
 def is_zip_file(zip_path):
     """Checks if the file is a ZIP archive."""
     try:
+        # Attempt to open the file as an AES Zip file
         with pyzipper.AESZipFile(zip_path) as zip_file:
+            # If it opens without error, return True indicating it's a ZIP file
             return True
     except (pyzipper.zipfile.BadZipFile, RuntimeError):
+        # If the file is not a valid ZIP archive, return False
+        return False
+    except PermissionError:
+        print(f"[-] Permission denied: {zip_path}. Unable to access the file.")
+        return False
+    except FileNotFoundError:
+        print(f"[-] File not found: {zip_path}. Ensure the file path is correct.")
+        return False
+    except Exception as e:
+        print(f"[-] Unexpected error while checking ZIP file: {e}")
         return False
 
-def extract_pe_from_sfx(sfx_path, output_dir='extracted_exe'):
-    """Extracts PE file from a WinRAR SFX archive and checks if its still an archive."""
-    with open(sfx_path, 'rb') as sfx_file:
-        sfx_data = sfx_file.read()
+def is_pe_file(file_path):
+    """Checks if the file is a valid PE file using pefile."""
+    try:
+        pe = pefile.PE(file_path)
+        # If no exception was raised, the file is a valid PE file
+        return True
+    except pefile.PEFormatError:
+        # If the file is not a valid PE file, it raises a PEFormatError
+        return False
+    except Exception as e:
+        print(f"[-] Error processing {file_path}: {e}")
+        return False
 
-    pe_offset = sfx_data.find(b'MZ')  # Find the PE header "MZ"
-    if pe_offset == -1:
-        print("[!] No embedded executable found in the SFX file.")
+def extract_with_7z(archive_path, output_dir='extracted_output', seven_zip_folder='C:\\Program Files\\7-Zip'):
+    """Extracts a file using 7-Zip and checks for PE files in the extracted content."""
+    
+    # Define the path to the 7z executable
+    seven_zip_path = os.path.join(seven_zip_folder, '7z.exe')
+    
+    # Check if the 7z executable exists
+    if not os.path.exists(seven_zip_path):
+        print(f"[-] 7z.exe not found at {seven_zip_path}")
+        return None
+    
+    # Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Running the extraction command
+    extraction_command = [seven_zip_path, 'x', archive_path, f'-o{output_dir}', '-y']
+    result = subprocess.run(extraction_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    # Check if extraction was successful
+    if result.returncode != 0:
+        print(f"[-] Error during extraction:\n{result.stderr}")
         return None
 
-    os.makedirs(output_dir, exist_ok=True)
-    extracted_exe_path = os.path.join(output_dir, 'extracted_executable.exe')
-    with open(extracted_exe_path, 'wb') as extracted_exe:
-        extracted_exe.write(sfx_data[pe_offset:])
+    # Log extraction success
+    print(f"[*] Extraction successful:\n{result.stdout}")
 
-    # Check if the extracted file is another archive
-    if is_winrar_sfx(extracted_exe_path) or is_zip_file(extracted_exe_path):
-        print(f"[*] Extracted PE is still an archive: {extracted_exe_path}")
-        return extracted_exe_path  # Return the path to allow further processing
+    # Verify extracted files
+    extracted_files = os.listdir(output_dir)
+    if not extracted_files:
+        print("[!] No files were extracted.")
+        return None
+
+    print(f"[+] Files extracted to {output_dir}")
+    
+    # Track the latest PE file found
+    latest_executable = None
+    
+    # Process each extracted file individually
+    for file in extracted_files:
+        file_path = os.path.join(output_dir, file)
+        
+        # Check if the extracted file is a PE file
+        if is_pe_file(file_path):
+            print(f"[+] Found PE file: {file_path}")
+            latest_executable = file_path  # Update the latest executable path
+        
+        # Check if the extracted file is a ZIP archive
+        elif is_zip_file(file_path):
+            print(f"[+] Found ZIP archive: {file_path}")
+        
+        else:
+            print(f"[-] {file_path} is neither a PE file nor a ZIP archive.")
+    
+    # After processing, return the latest executable found, if any
+    if latest_executable:
+        print(f"[+] Latest executable found: {latest_executable}")
+        return latest_executable
     else:
-        print(f"[+] Non-archive executable extracted: {extracted_exe_path}")
-        return extracted_exe_path
+        print("[!] No executable found in extracted files.")
+        return None
+        
+def find_pe_files(directory):
+    """Scans a directory for PE files using the pefile library."""
+    pe_files = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            file_path = os.path.join(root, file)
+            if is_pe_file(file_path):
+                pe_files.append(file_path)
+    return pe_files
 
 def extract_zip_file(zip_path, output_dir='extracted_zip', password='infected'):
     """Extracts files from a ZIP archive, handles nested ZIPs."""
@@ -467,60 +577,56 @@ def extract_zip_file(zip_path, output_dir='extracted_zip', password='infected'):
         print("[!] Incorrect password or encryption issue.")
         return None
 
-def is_executable(file_path):
-    """Check if a file is a valid PE (Portable Executable) using pefile."""
-    try:
-        # Attempt to load the file as a PE file using pefile
-        pe = pefile.PE(file_path)
-        pe.close()
-        return True
-    except pefile.PEFormatError:
-        # Not a valid PE file
-        return False
-    except Exception as e:
-        # Handle other unexpected errors (e.g., access issues)
-        print(f"[!] Error checking if file is executable: {e}")
-        return False
-
 def process_file_until_non_archive(file_path, output_dir='processed_output', password='infected'):
     """Recursively processes archives until it finds a non-SFX, non-ZIP file or reaches an executable."""
     current_path = file_path
+    final_executable_path = None  # Track the latest executable found
+    
     while True:
-        if is_winrar_sfx(current_path):
-            print(f"[*] WinRAR SFX archive detected: {current_path}")
-            # Treat SFX as executable and extract embedded PE file
-            current_path = extract_pe_from_sfx(current_path, output_dir)
-            if current_path is None:
-                print("[!] No executable found in SFX.")
-                break
+        # Check if the current file is an executable
+        if is_pe_file(current_path):
+            print(f"[+] Executable file found: {current_path}")
+            final_executable_path = current_path  # Update the latest executable path
+            
+            # If it's an executable, check if it's also a WinRAR SFX archive
+            if is_winrar_sfx(current_path):
+                print(f"[*] WinRAR SFX archive detected: {current_path}")
+                extracted_path = extract_with_7z(current_path, output_dir)
+                
+                if extracted_path is None:
+                    print("[!] No executable found in SFX.")
+                    return final_executable_path  # Return the last executable found before SFX
+                
+                print(f"[+] Executable extracted from SFX: {extracted_path}")
+                current_path = extracted_path  # Update the path to the newly extracted executable
+                continue  # Continue processing the extracted executable file
+
             else:
-                print(f"[+] Executable extracted from SFX: {current_path}")
-                # Process the extracted executable file
-                break
+                # It's a regular executable, break out of the loop and return this file path
+                return final_executable_path
+
+        # If the file is a ZIP archive, extract it and process the nested files
         elif is_zip_file(current_path):
             print(f"[*] ZIP file detected: {current_path}")
-            current_path = extract_zip_file(current_path, output_dir, password)
-            if current_path is None:
+            extracted_path = extract_zip_file(current_path, output_dir, password)
+            if extracted_path is None:
                 print("[!] Could not extract ZIP file.")
-                break
+                return final_executable_path  # Return the last executable path if ZIP extraction fails
 
             # Handle nested files if any are extracted from the ZIP
-            nested_files = [os.path.join(current_path, f) for f in os.listdir(current_path)]
+            nested_files = [os.path.join(extracted_path, f) for f in os.listdir(extracted_path)]
             if nested_files:
                 current_path = nested_files[0]  # Continue with the first nested file
             else:
                 print("[!] No files found in extracted ZIP.")
-                break
-        elif is_executable(current_path):
-            # Check if the current file is an executable
-            print(f"[+] Executable file found: {current_path}")
-            # Process this executable file directly
-            break
+                return final_executable_path  # Return the last executable path if ZIP has no files
         else:
+            # If it's neither an archive nor an executable, break and return the last executable found
             print(f"[+] Non-archive, non-executable file found: {current_path}")
-            break
-    return current_path
+            return final_executable_path  # Return the last executable path processed
 
+    return final_executable_path  # Return the final executable path after all processing
+      
 def main():
     exela_path = input("Enter the path of the infected Exela Stealer file: ")
     output_dir = "exela_extracted"
@@ -530,6 +636,8 @@ def main():
     if final_file_path is None:
         print("[!] Could not reach the final file for processing.")
         return
+    
+    print(f"[+] Final file path for processing: {final_file_path}")
 
     arch = PyInstArchive(final_file_path)
     if arch.open():
