@@ -1,0 +1,3 @@
+cython --embed -o ExelaV2StealerDecompiler.c ExelaV2StealerDecompiler.py
+# Download Visual Studio 2022
+cl ExelaV2StealerDecompiler.c /I "%APPDATA%\..\Local\Programs\Python\Python313\include" /link /LIBPATH:"%APPDATA%\..\Local\Programs\Python\Python313\libs" python313.lib
