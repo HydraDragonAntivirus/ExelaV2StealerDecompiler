@@ -1,1 +1,5 @@
+#More faster
 python setup.py build
+
+#More stable
+pyinstaller --noconfirm --onefile --console --uac-admin  "C:\Users\victim\Documents\GitHub\ExelaV2StealerDecompiler\ExelaV2StealerDecompiler.py"
