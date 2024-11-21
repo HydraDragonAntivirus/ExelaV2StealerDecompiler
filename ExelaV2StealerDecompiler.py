@@ -449,15 +449,7 @@ def is_winrar_sfx(file_path):
     except Exception as e:
         print(f"[-] Error processing the file: {e}")
         return False
-
-    finally:
-        if os.path.exists(temp_file_path):
-            try:
-                print(f"[*] Removing temporary file: {temp_file_path}")
-                os.remove(temp_file_path)
-            except Exception as cleanup_error:
-                print(f"[-] Error removing temporary file: {cleanup_error}")
-
+        
 def is_zip_file(zip_path):
     """Checks if the file is a ZIP archive."""
     try:
