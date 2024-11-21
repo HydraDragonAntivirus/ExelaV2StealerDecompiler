@@ -2,7 +2,7 @@ from cx_Freeze import setup, Executable
 
 # Define the executable and options
 executables = [Executable("ExelaV2StealerDecompiler.py", target_name="ExelaV2StealerDecompiler.exe", 
-                          base="Win32GUI", 
+                          base="Console", 
                           icon=None,  # You can add an icon if you have one
                           uac_admin=1)]  # This line requests admin privileges
 
